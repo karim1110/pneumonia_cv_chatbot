@@ -123,20 +123,23 @@ def process_image(uploaded_file):
         st.error(f"Error processing image: {e}")
         return None, None
     
-# Function to handle the chat conversation using Hugging Face Inference APIimport requests
 def chat_response(user_input):
     API_URL = "https://api-inference.huggingface.co/models/mistralai/Mistral-7B-Instruct-v0.3"  # Note: v0.1 is more stable
-    
+
     headers = {"Authorization": f"Bearer {HUGGINGFACE_API_TOKEN}"}
-    
-    # Key Fix: Use INST/<<SYS>> format that Mistral-7B-Instruct expects
+
+    # Get the last few messages (excluding the current user input)
+    history = st.session_state.messages[-5:-1] if len(st.session_state.messages) > 1 else []
+    history_str = "\n".join([f"{msg['role'].capitalize()}: {msg['content']}" for msg in history])
+
     prompt = f"""<s>[INST] <<SYS>>
 You are PneumoAssist, a concise assistant. You are also able to predict pneumonia based on x ray images with a 91% accuracy when the user submits an image. 
-Respond briefly and shortly to the user's input. Do NOT continue conversations or assume symptoms or anything.
+Respond briefly and shortly to the user's input, considering the recent conversation. Do NOT continue conversations or assume symptoms or anything beyond the immediate query.
 <</SYS>>
 
+{history_str}
 User: {user_input} [/INST]"""
-    
+
     payload = {
         "inputs": prompt,
         "parameters": {
@@ -146,12 +149,10 @@ User: {user_input} [/INST]"""
             "repetition_penalty": 1.5  # Avoid repetition
         }
     }
-    
 
     response = requests.post(API_URL, headers=headers, json=payload)
     response.raise_for_status()
     full_text = response.json()[0]['generated_text']
-    # Isolate the response after [/INST]
     return full_text.split("[/INST]")[-1].strip()
 
     
@@ -184,11 +185,8 @@ def analyze_image(uploaded_file):
                 Note: If you're experiencing symptoms, please consult a healthcare provider regardless of this result.
                 """
             # Display original image and results
-            col1, col2 = st.columns([1, 1])
-            with col1:
-                st.image(original_image, caption="Uploaded X-ray", use_container_width=True)
-            with col2:
-                st.info("Analysis Visualization Coming Soon...", icon="💡") # Placeholder for future visualization
+            st.image(original_image, caption="Uploaded X-ray", use_container_width=True)
+
             # Display result box with properly escaped HTML
             cleaned_explanation = explanation.replace('\n', '<br>').strip()
             st.markdown(f"""
@@ -204,11 +202,11 @@ def analyze_image(uploaded_file):
             # Log the analysis in chat history - clean up the content
             analysis_summary = f"I've analyzed your X-ray. {result_class} (Confidence: {probability_percentage:.1f}%)."
             # Only add to messages if not already there (prevent duplication)
-            if not any(msg["content"] == analysis_summary and msg["role"] == "assistant" for msg in st.session_state.messages[-3:]):
-                st.session_state.messages.append({
-                    "role": "assistant",
-                    "content": analysis_summary
-                })
+            #if not any(msg["content"] == analysis_summary and msg["role"] == "assistant" for msg in st.session_state.messages[-3:]):
+            st.session_state.messages.append({
+                "role": "assistant",
+                "content": analysis_summary
+            })
             return True
     return False
 # Create two columns for layout
@@ -224,7 +222,7 @@ with col1:
             <li>Wait for the analysis results</li>
             <li>Ask follow-up questions in the chat</li>
         </ol>
-        <p class="disclaimer">This tool analyzes chest X-rays for potential signs of pneumonia with ~90% accuracy on test datasets. Always consult healthcare professionals for diagnosis.</p>
+        <p class="disclaimer">This tool analyzes chest X-rays for potential signs of pneumonia with ~90% F1-score on test datasets. Always consult healthcare professionals for diagnosis.</p>
     </div>
     """, unsafe_allow_html=True)
     # File uploader with key to track changes
